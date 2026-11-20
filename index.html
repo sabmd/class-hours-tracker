@@ -180,6 +180,20 @@ tr:last-child td { border-bottom: 0; }
 .empty strong { color: var(--fg); display: block; font-family: var(--font-display); font-size: 1rem; margin-bottom: 4px; }
 .more { align-self: center; }
 
+/* Monthly report */
+.report-nav { display: flex; align-items: center; gap: 6px; }
+.icon-btn { border: 1px solid var(--line); background: transparent; border-radius: 8px; width: 34px; height: 34px; cursor: pointer; font-size: 1.05rem; line-height: 1; }
+.icon-btn:hover:not(:disabled) { border-color: var(--muted); }
+.icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.month-label { font-family: var(--font-display); font-weight: 600; min-width: 9.5em; text-align: center; }
+.report-stats { display: flex; flex-wrap: wrap; gap: 10px 36px; }
+.report-note { font-size: 0.88rem; color: var(--muted); margin: 0; }
+.report-actions { display: flex; justify-content: flex-end; align-items: center; gap: 12px; flex-wrap: wrap; }
+.report-actions .hint { font-size: 0.8rem; color: var(--muted); }
+.mini-bar { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; min-width: 80px; }
+.mini-bar span { display: block; height: 100%; background: var(--c); border-radius: 3px; }
+td.r, th.r { text-align: right; }
+
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%);
   bottom: calc(18px + env(safe-area-inset-bottom, 0px));
@@ -281,6 +295,24 @@ tr:last-child td { border-bottom: 0; }
     </section>
   </div>
 
+  <section class="panel" aria-labelledby="rep-h">
+    <div class="panel-head">
+      <h2 id="rep-h">Monthly report</h2>
+      <div class="report-nav">
+        <button type="button" class="icon-btn" id="rep-prev" aria-label="Previous month">&#8249;</button>
+        <span class="month-label num" id="rep-month" aria-live="polite"></span>
+        <button type="button" class="icon-btn" id="rep-next" aria-label="Next month">&#8250;</button>
+      </div>
+    </div>
+    <div class="report-stats" id="rep-stats"></div>
+    <div class="table-box" id="rep-table"></div>
+    <p class="report-note" id="rep-note"></p>
+    <div class="report-actions">
+      <span class="hint">Includes subject totals, a week-by-week breakdown and every class</span>
+      <button type="button" class="btn" id="rep-pdf">Download PDF</button>
+    </div>
+  </section>
+
   <section class="panel" aria-labelledby="table-h">
     <div class="panel-head">
       <h2 id="table-h">Class log</h2>
@@ -292,6 +324,7 @@ tr:last-child td { border-bottom: 0; }
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 (function () {
   "use strict";
@@ -567,7 +600,229 @@ tr:last-child td { border-bottom: 0; }
     more.textContent = showAll ? "Show fewer" : "Show all " + list.length + " entries";
   }
 
-  function renderAll() { renderSummary(); renderChart(); renderTable(); }
+  /* ---------- monthly report ---------- */
+  var FULL_MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  var PDF_COLORS = { ACC: "#2f6fd6", ECO: "#c66d17", IP: "#12897a", BST: "#9c3b97" };
+  var repY, repM;
+
+  function monthSummary(y, m) {
+    var prefix = y + "-" + pad(m + 1) + "-";
+    var list = entries.filter(function (e) { return e.date.indexOf(prefix) === 0; }).slice().sort(function (a, b) {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      return (a.createdAt || "") < (b.createdAt || "") ? -1 : 1;
+    });
+    var daysInMonth = new Date(y, m + 1, 0).getDate();
+    var total = 0, dayTotals = {};
+    list.forEach(function (e) { total += e.minutes; dayTotals[e.date] = (dayTotals[e.date] || 0) + e.minutes; });
+    var daysStudied = Object.keys(dayTotals).length;
+    var busiest = null;
+    Object.keys(dayTotals).forEach(function (k) { if (!busiest || dayTotals[k] > busiest.minutes) busiest = { date: k, minutes: dayTotals[k] }; });
+    var subjects = SUBJECTS.map(function (s) {
+      var mine = list.filter(function (e) { return e.subject === s.id; });
+      var mins = mine.reduce(function (a, e) { return a + e.minutes; }, 0);
+      return { s: s, minutes: mins, count: mine.length, share: total ? mins / total : 0 };
+    });
+    var top = subjects.slice().sort(function (a, b) { return b.minutes - a.minutes; })[0];
+    var least = subjects.slice().sort(function (a, b) { return a.minutes - b.minutes; })[0];
+    // weeks run Monday to Sunday, clipped to the month
+    var offset = (new Date(y, m, 1).getDay() + 6) % 7;
+    var weeks = [];
+    for (var d = 1; d <= daysInMonth; d++) {
+      var wi = Math.floor((d - 1 + offset) / 7);
+      if (!weeks[wi]) { weeks[wi] = { from: d, to: d, by: {}, total: 0 }; SUBJECTS.forEach(function (s) { weeks[wi].by[s.id] = 0; }); }
+      weeks[wi].to = d;
+    }
+    list.forEach(function (e) {
+      var day = +e.date.slice(8, 10), w = weeks[Math.floor((day - 1 + offset) / 7)];
+      w.by[e.subject] += e.minutes; w.total += e.minutes;
+    });
+    return {
+      y: y, m: m, label: FULL_MONTHS[m] + " " + y, list: list, total: total, count: list.length,
+      daysInMonth: daysInMonth, daysStudied: daysStudied, avgPerDay: daysStudied ? total / daysStudied : 0,
+      busiest: busiest, subjects: subjects, top: top, least: least, weeks: weeks
+    };
+  }
+
+  function isCurrentOrLater(y, m) { var t = today(); return y > t.getFullYear() || (y === t.getFullYear() && m >= t.getMonth()); }
+
+  function renderReport() {
+    var S = monthSummary(repY, repM);
+    $("rep-month").textContent = S.label;
+    $("rep-next").disabled = isCurrentOrLater(repY, repM);
+    var stat = function (v, l) { return '<div class="stat"><span class="v num">' + v + '</span><span class="l">' + l + '</span></div>'; };
+    $("rep-stats").innerHTML = stat(fmt(S.total), "total time") + stat(S.count, S.count === 1 ? "class" : "classes") +
+      stat(S.daysStudied + '<span style="font-size:0.6em;color:var(--muted)"> / ' + S.daysInMonth + '</span>', "days studied") +
+      stat(fmt(S.avgPerDay), "average per study day");
+    if (!S.count) {
+      $("rep-table").innerHTML = "";
+      $("rep-note").textContent = "No classes logged in " + S.label + ".";
+      $("rep-pdf").disabled = true;
+      return;
+    }
+    $("rep-pdf").disabled = false;
+    var html = '<table><thead><tr><th scope="col">Subject</th><th scope="col" class="r">Time</th><th scope="col" class="r">Classes</th><th scope="col" class="r">Avg per class</th><th scope="col" class="r">Share</th><th scope="col"><span style="position:absolute;left:-9999px">Share bar</span></th></tr></thead><tbody>';
+    S.subjects.forEach(function (r) {
+      var pct = Math.round(r.share * 100);
+      html += '<tr><td><span class="pill" style="--c:' + r.s.color + '"><i></i>' + r.s.name + '</span></td>' +
+        '<td class="r dur num">' + fmt(r.minutes) + '</td><td class="r num">' + r.count + '</td>' +
+        '<td class="r num">' + (r.count ? fmt(r.minutes / r.count) : "–") + '</td><td class="r num">' + pct + '%</td>' +
+        '<td style="width:28%"><div class="mini-bar" style="--c:' + r.s.color + '"><span style="width:' + pct + '%"></span></div></td></tr>';
+    });
+    html += '</tbody></table>';
+    $("rep-table").innerHTML = html;
+    var note = "Most time on " + S.top.s.name + ".";
+    if (S.busiest) note += " Busiest day: " + prettyDate(S.busiest.date) + " (" + fmt(S.busiest.minutes) + ").";
+    if (S.least.minutes === 0) note += " No classes logged for " + S.least.s.name + " this month.";
+    $("rep-note").textContent = note;
+  }
+
+  function pdfText(s) {
+    return String(s).replace(/[–—]/g, "-").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[^\x20-\x7E\xA0-\xFF]/g, "?");
+  }
+
+  function buildPdf(S) {
+    var J = window.jspdf && window.jspdf.jsPDF;
+    if (!J) throw new Error("nolib");
+    var doc = new J({ unit: "mm", format: "a4" });
+    var W = 210, H = 297, M = 18, y = M;
+    var INK = "#152031", MUTED = "#5a6679", LINE = "#d8dee8", BG = "#e9edf4";
+    var mon = MONTHS[S.m];
+    function font(style, size, color) { doc.setFont("helvetica", style); doc.setFontSize(size); doc.setTextColor(color); }
+    function ensure(h, redraw) { if (y + h > H - 20) { doc.addPage(); y = M; if (redraw) redraw(); return true; } return false; }
+    function section(title) {
+      ensure(22);
+      y += 4; font("bold", 12, INK); doc.text(title, M, y);
+      y += 3; doc.setDrawColor(LINE); doc.setLineWidth(0.3); doc.line(M, y, W - M, y); y += 6;
+    }
+
+    // Header
+    font("bold", 20, INK); doc.text("Class Hours Report", M, y + 6);
+    font("normal", 12, MUTED); doc.text(S.label, M, y + 13);
+    var t = today();
+    font("normal", 9, MUTED); doc.text("Generated " + t.getDate() + " " + MONTHS[t.getMonth()] + " " + t.getFullYear(), W - M, y + 6, { align: "right" });
+    y += 20; doc.setDrawColor(LINE); doc.setLineWidth(0.3); doc.line(M, y, W - M, y); y += 9;
+
+    // Headline figures
+    var stats = [[fmt(S.total), "Total time"], [String(S.count), S.count === 1 ? "Class" : "Classes"],
+      [S.daysStudied + " of " + S.daysInMonth, "Days studied"], [fmt(S.avgPerDay), "Average per study day"]];
+    var cw = (W - 2 * M) / 4;
+    stats.forEach(function (s, i) {
+      var x = M + i * cw;
+      font("bold", 17, INK); doc.text(s[0], x, y + 5);
+      font("normal", 9, MUTED); doc.text(s[1], x, y + 10.5);
+    });
+    y += 17;
+    var note = "Most time on " + S.top.s.name + ".";
+    if (S.busiest) { var bd = parse(S.busiest.date); note += " Busiest day: " + WD[bd.getDay()] + " " + bd.getDate() + " " + mon + " (" + fmt(S.busiest.minutes) + ")."; }
+    if (S.least.minutes === 0) note += " No classes logged for " + S.least.s.name + ".";
+    font("normal", 10, INK); doc.text(doc.splitTextToSize(note, W - 2 * M), M, y); y += 8;
+
+    // Hours by subject
+    section("Hours by subject");
+    var cx = { name: M, time: M + 72, cls: M + 92, avg: M + 116, share: M + 132, bar: M + 138 };
+    var barW = W - M - cx.bar;
+    font("bold", 8, MUTED);
+    doc.text("SUBJECT", cx.name, y); doc.text("TIME", cx.time, y, { align: "right" }); doc.text("CLASSES", cx.cls, y, { align: "right" });
+    doc.text("AVG/CLASS", cx.avg, y, { align: "right" }); doc.text("SHARE", cx.share, y, { align: "right" });
+    y += 7;
+    S.subjects.forEach(function (r) {
+      var col = PDF_COLORS[r.s.id];
+      doc.setFillColor(col); doc.rect(cx.name, y - 3, 3.2, 3.2, "F");
+      font("normal", 10.5, INK); doc.text(r.s.name, cx.name + 6, y);
+      font("bold", 10.5, INK); doc.text(fmt(r.minutes), cx.time, y, { align: "right" });
+      font("normal", 10.5, INK);
+      doc.text(String(r.count), cx.cls, y, { align: "right" });
+      doc.text(r.count ? fmt(r.minutes / r.count) : "-", cx.avg, y, { align: "right" });
+      doc.text(Math.round(r.share * 100) + "%", cx.share, y, { align: "right" });
+      doc.setFillColor(BG); doc.rect(cx.bar, y - 2.6, barW, 2.6, "F");
+      if (r.share > 0) { doc.setFillColor(col); doc.rect(cx.bar, y - 2.6, Math.max(0.6, barW * r.share), 2.6, "F"); }
+      y += 8;
+    });
+    y += 2;
+
+    // Week by week
+    section("Week by week");
+    var wcols = ["Accounts", "Economics", "IP", "Bus. Studies", "Total"];
+    var wx0 = M + 46, wcw = (W - M - wx0) / 5;
+    function weekHeader() {
+      font("bold", 8, MUTED); doc.text("WEEK", M, y);
+      wcols.forEach(function (c, i) { doc.text(c.toUpperCase(), wx0 + wcw * (i + 1) - 2, y, { align: "right" }); });
+      y += 7;
+    }
+    weekHeader();
+    S.weeks.forEach(function (w) {
+      ensure(8, weekHeader);
+      font("normal", 10.5, INK);
+      doc.text(w.from === w.to ? w.from + " " + mon : w.from + "-" + w.to + " " + mon, M, y);
+      SUBJECTS.forEach(function (s, i) {
+        font("normal", 10.5, w.by[s.id] ? INK : MUTED);
+        doc.text(w.by[s.id] ? fmt(w.by[s.id]) : "-", wx0 + wcw * (i + 1) - 2, y, { align: "right" });
+      });
+      font("bold", 10.5, INK); doc.text(w.total ? fmt(w.total) : "-", wx0 + wcw * 5 - 2, y, { align: "right" });
+      y += 7.5;
+    });
+    y += 2;
+
+    // All classes
+    section("All classes (" + S.count + ")");
+    var lx = { date: M, subj: M + 28, time: M + 76, topic: M + 82 }, topicW = W - M - lx.topic;
+    function listHeader() {
+      font("bold", 8, MUTED);
+      doc.text("DATE", lx.date, y); doc.text("SUBJECT", lx.subj, y); doc.text("TIME", lx.time, y, { align: "right" }); doc.text("TOPIC", lx.topic, y);
+      y += 6.5;
+    }
+    listHeader();
+    S.list.forEach(function (e) {
+      ensure(7, listHeader);
+      var d = parse(e.date), s = BY_ID[e.subject];
+      font("normal", 10, INK); doc.text(WD[d.getDay()] + " " + d.getDate() + " " + mon, lx.date, y);
+      doc.setFillColor(PDF_COLORS[s.id]); doc.rect(lx.subj, y - 2.8, 2.8, 2.8, "F");
+      doc.text(s.name, lx.subj + 4.5, y);
+      font("bold", 10, INK); doc.text(fmt(e.minutes), lx.time, y, { align: "right" });
+      font("normal", 9.5, e.note ? INK : MUTED);
+      var lines = doc.splitTextToSize(pdfText(e.note || "-"), topicW);
+      doc.text(lines.length > 1 ? lines[0].replace(/\s*\S{0,3}$/, "") + "..." : lines[0], lx.topic, y);
+      y += 6.5;
+      doc.setDrawColor(BG); doc.setLineWidth(0.2); doc.line(M, y - 4.2, W - M, y - 4.2);
+    });
+
+    // Footer
+    var n = doc.getNumberOfPages();
+    for (var p = 1; p <= n; p++) {
+      doc.setPage(p);
+      font("normal", 8, MUTED);
+      doc.text("Class Hours Tracker  |  " + S.label, M, H - 10);
+      doc.text("Page " + p + " of " + n, W - M, H - 10, { align: "right" });
+    }
+    return doc;
+  }
+
+  var downloadsP = null;
+  function downloadPdf() {
+    var S = monthSummary(repY, repM);
+    if (!S.count) return;
+    var doc;
+    try { doc = buildPdf(S); } catch (e) {
+      toast(e && e.message === "nolib" ? "The PDF tool didn't load. Check your connection and reload the page." : "Couldn't build the PDF. Try again.");
+      return;
+    }
+    var filename = "class-hours-" + S.y + "-" + pad(S.m + 1) + ".pdf";
+    var btn = $("rep-pdf");
+    if (!downloadsP) { doc.save(filename); toast("PDF downloaded"); return; }
+    btn.disabled = true;
+    downloadsP.then(function (dl) {
+      if (!dl) { toast("Downloads aren't available in this view."); return; }
+      return dl.save({ filename: filename, data: doc.output("blob") }).then(function (r) {
+        if (r && r.status === "saved") toast("PDF saved");
+      }, function (err) {
+        var code = err && err.code;
+        if (code === "declined") return;
+        toast(code === "rate_limited" ? "A save is already waiting for you. Finish that one first." : "Couldn't save the PDF. Try again.");
+      });
+    }).then(function () { btn.disabled = false; });
+  }
+
+  function renderAll() { renderSummary(); renderChart(); renderTable(); renderReport(); }
 
   /* ---------- static UI ---------- */
   function buildPicker() {
@@ -718,6 +973,16 @@ tr:last-child td { border-bottom: 0; }
     $("table-box").addEventListener("click", onTableClick);
     $("timer").addEventListener("click", onTimerClick);
     $("show-more").addEventListener("click", function () { showAll = !showAll; renderTable(); });
+    repY = today().getFullYear(); repM = today().getMonth();
+    $("rep-prev").addEventListener("click", function () { repM--; if (repM < 0) { repM = 11; repY--; } renderReport(); });
+    $("rep-next").addEventListener("click", function () {
+      if (isCurrentOrLater(repY, repM)) return;
+      repM++; if (repM > 11) { repM = 0; repY++; } renderReport();
+    });
+    $("rep-pdf").addEventListener("click", downloadPdf);
+    if (window.claude && typeof window.claude.use === "function") {
+      downloadsP = window.claude.use("downloads").catch(function () { return null; });
+    }
     renderAll();
     renderTimer();
     connect();
