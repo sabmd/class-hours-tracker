@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Class Hours Tracker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>
+/* Layout: summary strip, four subject tiles, then log form beside a 14-day stacked chart, then the class log table */
+:root {
+  --bg: #f2f4f8;
+  --surface: #ffffff;
+  --surface-2: #e9edf4;
+  --fg: #152031;
+  --muted: #5a6679;
+  --line: #d8dee8;
+  --accent: #2a47b8;
+  --accent-fg: #ffffff;
+  --acc: #2f6fd6;
+  --eco: #c66d17;
+  --ip: #12897a;
+  --bst: #9c3b97;
+  --good: #1b7f48;
+  --danger: #c0353a;
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e131b; --surface: #161d28; --surface-2: #1f2735; --fg: #e6ebf3; --muted: #95a1b4; --line: #2a3444;
+    --accent: #8ea6ff; --accent-fg: #0e131b;
+    --acc: #6ea2ff; --eco: #f0a250; --ip: #3dc6ad; --bst: #d47ccd; --good: #4fcf88; --danger: #ff7a7f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e131b; --surface: #161d28; --surface-2: #1f2735; --fg: #e6ebf3; --muted: #95a1b4; --line: #2a3444;
+  --accent: #8ea6ff; --accent-fg: #0e131b;
+  --acc: #6ea2ff; --eco: #f0a250; --ip: #3dc6ad; --bst: #d47ccd; --good: #4fcf88; --danger: #ff7a7f;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.wrap {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+h1, h2 { font-family: var(--font-display); margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h1 { font-size: clamp(1.7rem, 4vw, 2.3rem); font-weight: 700; }
+h2 { font-size: 1.1rem; font-weight: 600; }
+.num { font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); font-weight: 600; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Header */
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px; }
+.top-left { display: flex; flex-direction: column; gap: 4px; }
+.status { display: inline-flex; align-items: center; gap: 7px; font-size: 0.82rem; color: var(--muted); }
+.status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.status[data-state="synced"] .dot { background: var(--good); }
+.status[data-state="error"] .dot, .status[data-state="slow"] .dot { background: var(--danger); }
+.seg { display: inline-flex; background: var(--surface-2); border-radius: 999px; padding: 3px; gap: 2px; }
+.seg button {
+  border: 0; background: transparent; padding: 7px 14px; border-radius: 999px; cursor: pointer;
+  font-size: 0.86rem; font-weight: 500; color: var(--muted);
+}
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+
+/* Summary */
+.summary { display: flex; flex-wrap: wrap; gap: 10px 40px; align-items: baseline; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat .v { font-family: var(--font-display); font-size: 1.6rem; font-weight: 600; line-height: 1.1; }
+.stat.big .v { font-size: clamp(2.2rem, 6vw, 3rem); }
+.stat .l { font-size: 0.82rem; color: var(--muted); }
+
+/* Subject tiles */
+.subjects { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.tile {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  border-top: 4px solid var(--c);
+}
+.tile .name { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.tile .name strong { font-family: var(--font-display); font-size: 0.98rem; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+.tile .code { font-size: 0.72rem; color: var(--muted); letter-spacing: 0.06em; font-weight: 600; }
+.tile .hrs { font-family: var(--font-display); font-size: 2rem; font-weight: 600; line-height: 1.05; }
+.tile .meta { font-size: 0.8rem; color: var(--muted); }
+.share { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.share span { display: block; height: 100%; background: var(--c); border-radius: 3px; transition: width .3s ease; }
+
+/* Main grid */
+.main { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.panel-head .hint { font-size: 0.8rem; color: var(--muted); }
+
+/* Form */
+form { display: flex; flex-direction: column; gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field > label, .field > .label { font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+.subj-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.subj-pick input { position: absolute; opacity: 0; pointer-events: none; }
+.subj-pick label {
+  display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+  cursor: pointer; font-size: 0.86rem; font-weight: 500; min-width: 0;
+}
+.subj-pick label .sw { width: 10px; height: 10px; border-radius: 3px; background: var(--c); flex: none; }
+.subj-pick input:checked + label { border-color: var(--c); background: color-mix(in srgb, var(--c) 12%, var(--surface)); }
+.subj-pick input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+input[type="date"], input[type="number"], input[type="text"] {
+  width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+}
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 4px 11px; font-size: 0.8rem; cursor: pointer; color: var(--muted);
+}
+.chip:hover { color: var(--fg); border-color: var(--muted); }
+.btn {
+  border: 0; border-radius: 8px; padding: 10px 14px; font-weight: 600; cursor: pointer; background: var(--accent); color: var(--accent-fg);
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+.form-msg { font-size: 0.82rem; color: var(--danger); min-height: 1.2em; margin: -6px 0 0; }
+
+/* Timer */
+.timer { border: 1px dashed var(--line); border-radius: 8px; padding: 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.timer .t-label { font-size: 0.82rem; color: var(--muted); }
+.timer .clock { font-family: var(--font-display); font-size: 1.5rem; font-weight: 600; }
+.timer[data-running="true"] { border-style: solid; border-color: var(--c, var(--accent)); background: color-mix(in srgb, var(--c, var(--accent)) 8%, var(--surface)); }
+.timer .t-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Chart */
+.chart-box { overflow-x: auto; }
+.chart-box svg { display: block; width: 100%; min-width: 520px; height: auto; }
+.chart-box .ax { fill: var(--muted); font-size: 11px; font-family: var(--font-body); }
+.chart-box .ax.today { fill: var(--fg); font-weight: 600; }
+.chart-box .grid { stroke: var(--line); stroke-width: 1; }
+.chart-box .empty-msg { fill: var(--muted); font-size: 13px; font-family: var(--font-body); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.8rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; background: var(--c); display: inline-block; }
+
+/* Log table */
+.table-box { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; min-width: 520px; }
+th { text-align: left; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td.note { color: var(--muted); max-width: 320px; overflow-wrap: anywhere; }
+td.dur { font-weight: 600; white-space: nowrap; }
+td.date { white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px 2px 7px; border-radius: 999px; font-size: 0.78rem; font-weight: 600; background: color-mix(in srgb, var(--c) 14%, transparent); color: var(--fg); white-space: nowrap; }
+.pill i { width: 8px; height: 8px; border-radius: 2px; background: var(--c); display: inline-block; }
+.del { border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; white-space: nowrap; }
+.del:hover { color: var(--danger); border-color: var(--line); }
+.del[data-armed="true"] { color: var(--accent-fg); background: var(--danger); border-color: var(--danger); }
+.empty { text-align: center; color: var(--muted); padding: 28px 12px; font-size: 0.9rem; }
+.empty strong { color: var(--fg); display: block; font-family: var(--font-display); font-size: 1rem; margin-bottom: 4px; }
+.more { align-self: center; }
+
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-size: 0.88rem; font-weight: 500;
+  max-width: calc(100% - 32px); box-shadow: 0 6px 20px rgb(0 0 0 / 0.2);
+}
+
+@media (max-width: 900px) {
+  .main { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .subjects { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tile .hrs { font-size: 1.6rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .share span { transition: none; }
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="top-left">
+      <span class="eyebrow">Online classes</span>
+      <h1>Class hours</h1>
+      <span class="status" id="status" data-state="loading"><span class="dot"></span><span id="status-text">Connecting to your saved log…</span></span>
+    </div>
+    <div class="seg" role="group" aria-label="Time period">
+      <button type="button" id="p-week" data-period="week" aria-pressed="true">This week</button>
+      <button type="button" id="p-month" data-period="month" aria-pressed="false">This month</button>
+      <button type="button" id="p-all" data-period="all" aria-pressed="false">All time</button>
+    </div>
+  </header>
+
+  <section class="summary" aria-label="Summary">
+    <div class="stat big"><span class="v num" id="s-total">0h</span><span class="l" id="s-total-l">studied this week</span></div>
+    <div class="stat"><span class="v num" id="s-classes">0</span><span class="l">classes logged</span></div>
+    <div class="stat"><span class="v num" id="s-avg">0h</span><span class="l" id="s-avg-l">average per day</span></div>
+    <div class="stat"><span class="v num" id="s-streak">0</span><span class="l">day streak</span></div>
+  </section>
+
+  <section class="subjects" id="subjects" aria-label="Hours by subject"></section>
+
+  <div class="main">
+    <section class="panel" aria-labelledby="log-h">
+      <div class="panel-head"><h2 id="log-h">Log a class</h2></div>
+
+      <div class="timer" id="timer" data-running="false">
+        <div>
+          <div class="t-label" id="t-label">Class timer</div>
+          <div class="clock num" id="t-clock">0:00:00</div>
+        </div>
+        <div class="t-actions" id="t-actions">
+          <button type="button" class="btn ghost" id="t-start">Start timer</button>
+        </div>
+      </div>
+
+      <form id="entry-form" novalidate>
+        <div class="field">
+          <span class="label" id="subj-label">Subject</span>
+          <div class="subj-pick" role="radiogroup" aria-labelledby="subj-label" id="subj-pick"></div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="f-date">Date</label>
+            <input type="date" id="f-date" required>
+          </div>
+          <div class="field">
+            <label for="f-hours">Hours</label>
+            <input type="number" id="f-hours" min="0" max="23" step="1" inputmode="numeric" placeholder="0">
+          </div>
+          <div class="field">
+            <label for="f-mins">Minutes</label>
+            <input type="number" id="f-mins" min="0" max="59" step="1" inputmode="numeric" placeholder="0">
+          </div>
+        </div>
+        <div class="chips" aria-label="Quick durations">
+          <button type="button" class="chip" data-min="30">30m</button>
+          <button type="button" class="chip" data-min="45">45m</button>
+          <button type="button" class="chip" data-min="60">1h</button>
+          <button type="button" class="chip" data-min="90">1h 30m</button>
+          <button type="button" class="chip" data-min="120">2h</button>
+        </div>
+        <div class="field">
+          <label for="f-note">Topic covered <span style="font-weight:400">(optional)</span></label>
+          <input type="text" id="f-note" maxlength="140" placeholder="e.g. Partnership – admission of a partner">
+        </div>
+        <p class="form-msg" id="form-msg" role="alert"></p>
+        <button type="submit" class="btn" id="f-submit">Add to log</button>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="chart-h">
+      <div class="panel-head">
+        <h2 id="chart-h">Last 14 days</h2>
+        <span class="hint">Hours per day, stacked by subject</span>
+      </div>
+      <div class="chart-box" id="chart"></div>
+      <div class="legend" id="legend"></div>
+    </section>
+  </div>
+
+  <section class="panel" aria-labelledby="table-h">
+    <div class="panel-head">
+      <h2 id="table-h">Class log</h2>
+      <span class="hint" id="table-hint"></span>
+    </div>
+    <div class="table-box" id="table-box"></div>
+    <button type="button" class="btn ghost more" id="show-more" hidden>Show all entries</button>
+  </section>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+(function () {
+  "use strict";
+  var SUBJECTS = [
+    { id: "ACC", name: "Accounts", color: "var(--acc)" },
+    { id: "ECO", name: "Economics", color: "var(--eco)" },
+    { id: "IP", name: "IP", color: "var(--ip)" },
+    { id: "BST", name: "Business Studies", color: "var(--bst)" }
+  ];
+  var BY_ID = {};
+  SUBJECTS.forEach(function (s) { BY_ID[s.id] = s; });
+
+  var LS_ENTRIES = "class-hours-entries";
+  var LS_TIMER = "class-hours-timer";
+  var LS_PERIOD = "class-hours-period";
+
+  var entries = [];
+  var period = "week";
+  var store = null;
+  var readOnly = false;
+  var showAll = false;
+  var busy = false;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+
+  /* ---------- dates ---------- */
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function iso(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function parse(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function today() { var d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+  function addDays(d, n) { var x = new Date(d); x.setDate(x.getDate() + n); return x; }
+  function startOfWeek(d) { var day = (d.getDay() + 6) % 7; return addDays(d, -day); }
+  function daysBetween(a, b) { return Math.round((b - a) / 86400000); }
+  var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  var WD = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  function prettyDate(s) {
+    var d = parse(s), t = today(), diff = daysBetween(d, t);
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Yesterday";
+    var out = WD[d.getDay()] + " " + d.getDate() + " " + MONTHS[d.getMonth()];
+    if (d.getFullYear() !== t.getFullYear()) out += " " + d.getFullYear();
+    return out;
+  }
+
+  /* ---------- formatting ---------- */
+  function fmt(min) {
+    min = Math.round(min);
+    var h = Math.floor(min / 60), m = min % 60;
+    if (h === 0 && m === 0) return "0h";
+    if (h === 0) return m + "m";
+    if (m === 0) return h + "h";
+    return h + "h " + m + "m";
+  }
+
+  /* ---------- period ---------- */
+  function periodStart() {
+    var t = today();
+    if (period === "week") return startOfWeek(t);
+    if (period === "month") return new Date(t.getFullYear(), t.getMonth(), 1);
+    return null;
+  }
+  function inPeriod(e) {
+    var s = periodStart();
+    return !s || e.date >= iso(s);
+  }
+  var PERIOD_WORDS = { week: "this week", month: "this month", all: "in total" };
+
+  /* ---------- stores ---------- */
+  function clean(list) {
+    return list.filter(function (e) {
+      return e && BY_ID[e.subject] && /^\d{4}-\d{2}-\d{2}$/.test(e.date) && typeof e.minutes === "number" && e.minutes > 0;
+    }).sort(function (a, b) {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return (b.createdAt || "") < (a.createdAt || "") ? -1 : 1;
+    });
+  }
+
+  var localStore = {
+    mode: "local",
+    load: function () {
+      var a = [];
+      try { a = JSON.parse(lsGet(LS_ENTRIES) || "[]"); } catch (e) {}
+      return Array.isArray(a) ? a : [];
+    },
+    subscribe: function (cb) { this.cb = cb; cb(this.load()); },
+    add: function (e) {
+      var a = this.load();
+      a.push(Object.assign({ id: "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }, e));
+      lsSet(LS_ENTRIES, JSON.stringify(a));
+      this.cb(a);
+      return Promise.resolve();
+    },
+    remove: function (id) {
+      var a = this.load().filter(function (x) { return x.id !== id; });
+      lsSet(LS_ENTRIES, JSON.stringify(a));
+      this.cb(a);
+      return Promise.resolve();
+    }
+  };
+
+  function makeDbStore(db) {
+    var col = db.collection("sessions");
+    return {
+      mode: "db",
+      subscribe: function (cb, onErr, onConfirmed) {
+        return col.onSnapshot(function (snap) {
+          cb(snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }));
+          if (!snap.metadata.fromCache) onConfirmed();
+        }, onErr);
+      },
+      add: function (e) { return col.add(e); },
+      remove: function (id) { return col.doc(id).delete(); }
+    };
+  }
+
+  function setStatus(state) {
+    var text = {
+      loading: "Connecting to your saved log…",
+      slow: "Can't reach your saved log yet. Entries will appear once it connects.",
+      synced: "Saved to your account",
+      error: "Your saved log isn't available right now. Reload the page to try again.",
+      local: "Saved in this browser only"
+    }[state];
+    $("status").setAttribute("data-state", state);
+    $("status-text").textContent = text;
+  }
+
+  /* ---------- toast ---------- */
+  var toastTimer;
+  function toast(msg) {
+    var t = $("toast");
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.hidden = true; }, 2800);
+  }
+
+  /* ---------- render: summary + tiles ---------- */
+  function renderSummary() {
+    var list = entries.filter(inPeriod);
+    var total = list.reduce(function (s, e) { return s + e.minutes; }, 0);
+    $("s-total").textContent = fmt(total);
+    $("s-total-l").textContent = "studied " + PERIOD_WORDS[period];
+    $("s-classes").textContent = list.length;
+
+    var t = today(), start = periodStart(), days;
+    if (start) days = daysBetween(start, t) + 1;
+    else if (entries.length) days = Math.max(1, daysBetween(parse(entries[entries.length - 1].date), t) + 1);
+    else days = 1;
+    $("s-avg").textContent = fmt(total / days);
+    $("s-avg-l").textContent = "average per day" + (start ? "" : " since your first class");
+
+    var dates = {};
+    entries.forEach(function (e) { dates[e.date] = true; });
+    var d = t, streak = 0;
+    if (!dates[iso(d)]) d = addDays(d, -1);
+    while (dates[iso(d)]) { streak++; d = addDays(d, -1); }
+    $("s-streak").textContent = streak;
+
+    var html = "";
+    SUBJECTS.forEach(function (s) {
+      var mine = list.filter(function (e) { return e.subject === s.id; });
+      var mins = mine.reduce(function (a, e) { return a + e.minutes; }, 0);
+      var pct = total ? Math.round(mins / total * 100) : 0;
+      var last = entries.find(function (e) { return e.subject === s.id; });
+      html += '<article class="tile" style="--c:' + s.color + '">' +
+        '<div class="name"><strong>' + s.name + '</strong><span class="code">' + s.id + '</span></div>' +
+        '<div class="hrs num">' + fmt(mins) + '</div>' +
+        '<div class="share" aria-hidden="true"><span style="width:' + pct + '%"></span></div>' +
+        '<div class="meta num">' + pct + '% of time · ' + mine.length + (mine.length === 1 ? ' class' : ' classes') + '</div>' +
+        '<div class="meta">Last class: ' + (last ? prettyDate(last.date) : 'none yet') + '</div>' +
+        '</article>';
+    });
+    $("subjects").innerHTML = html;
+  }
+
+  /* ---------- render: chart ---------- */
+  function niceMax(hours) {
+    var steps = [1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24];
+    for (var i = 0; i < steps.length; i++) if (hours <= steps[i]) return steps[i];
+    return Math.ceil(hours);
+  }
+  function renderChart() {
+    var t = today(), days = [];
+    for (var i = 13; i >= 0; i--) days.push(addDays(t, -i));
+    var perDay = days.map(function (d) {
+      var key = iso(d), row = { date: d, key: key, total: 0, by: {} };
+      SUBJECTS.forEach(function (s) { row.by[s.id] = 0; });
+      entries.forEach(function (e) { if (e.date === key) { row.by[e.subject] += e.minutes; row.total += e.minutes; } });
+      return row;
+    });
+    var maxH = Math.max.apply(null, perDay.map(function (r) { return r.total / 60; }));
+    var top = niceMax(Math.max(maxH, 1));
+    var W = 640, H = 250, L = 38, R = 10, T = 14, B = 44;
+    var pw = W - L - R, ph = H - T - B, slot = pw / 14, bw = Math.min(28, slot * 0.62);
+    var y = function (h) { return T + ph - (h / top) * ph; };
+
+    var tickStep = top <= 2 ? 0.5 : top <= 4 ? 1 : top <= 8 ? 2 : top <= 12 ? 3 : top <= 16 ? 4 : 6;
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Hours studied per day over the last 14 days">';
+    for (var v = 0; v <= top + 1e-9; v += tickStep) {
+      var yy = y(v).toFixed(1);
+      svg += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + yy + '" y2="' + yy + '"/>';
+      svg += '<text class="ax" x="' + (L - 8) + '" y="' + yy + '" text-anchor="end" dominant-baseline="middle">' + (v % 1 ? v.toFixed(1) : v) + 'h</text>';
+    }
+    perDay.forEach(function (r, i) {
+      var cx = L + slot * i + slot / 2, x = cx - bw / 2, acc = 0;
+      var tip = WD[r.date.getDay()] + " " + r.date.getDate() + " " + MONTHS[r.date.getMonth()] + ": " + fmt(r.total);
+      var parts = [];
+      svg += '<g>';
+      SUBJECTS.forEach(function (s) {
+        var m = r.by[s.id];
+        if (!m) return;
+        parts.push(s.id + " " + fmt(m));
+        var h0 = acc / 60, h1 = (acc + m) / 60;
+        acc += m;
+        var y0 = y(h0), y1 = y(h1);
+        svg += '<rect x="' + x.toFixed(1) + '" y="' + y1.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(0.5, y0 - y1).toFixed(1) + '" style="fill:' + s.color + '"/>';
+      });
+      if (parts.length) tip += " (" + parts.join(", ") + ")";
+      svg += '<rect x="' + (cx - slot / 2).toFixed(1) + '" y="' + T + '" width="' + slot.toFixed(1) + '" height="' + ph + '" style="fill:transparent"><title>' + tip + '</title></rect>';
+      svg += '</g>';
+      var isToday = i === 13;
+      svg += '<text class="ax' + (isToday ? ' today' : '') + '" x="' + cx.toFixed(1) + '" y="' + (H - B + 17) + '" text-anchor="middle">' + r.date.getDate() + '</text>';
+      svg += '<text class="ax' + (isToday ? ' today' : '') + '" x="' + cx.toFixed(1) + '" y="' + (H - B + 32) + '" text-anchor="middle">' + (isToday ? 'Today' : WD[r.date.getDay()].charAt(0)) + '</text>';
+    });
+    if (maxH === 0) {
+      svg += '<text class="empty-msg" x="' + (L + pw / 2) + '" y="' + (T + ph / 2) + '" text-anchor="middle">No classes logged in the last 14 days</text>';
+    }
+    svg += '</svg>';
+    $("chart").innerHTML = svg;
+  }
+
+  /* ---------- render: table ---------- */
+  function renderTable() {
+    var list = entries.filter(inPeriod);
+    var box = $("table-box");
+    $("table-hint").textContent = list.length ? list.length + (list.length === 1 ? " entry " : " entries ") + PERIOD_WORDS[period].replace("in total", "in total") : "";
+    if (!list.length) {
+      box.innerHTML = '<div class="empty"><strong>' + (entries.length ? "No classes logged " + PERIOD_WORDS[period] : "Your log is empty") + '</strong>' +
+        (readOnly ? "" : "Pick a subject, enter how long the class ran, and press Add to log. Or start the class timer when your class begins.") + '</div>';
+      $("show-more").hidden = true;
+      return;
+    }
+    var LIMIT = 25, shown = showAll ? list : list.slice(0, LIMIT);
+    var table = document.createElement("table");
+    table.innerHTML = '<thead><tr><th scope="col">Date</th><th scope="col">Subject</th><th scope="col">Time</th><th scope="col">Topic</th><th scope="col"><span class="eyebrow" style="position:absolute;left:-9999px">Actions</span></th></tr></thead>';
+    var tb = document.createElement("tbody");
+    shown.forEach(function (e) {
+      var s = BY_ID[e.subject];
+      var tr = document.createElement("tr");
+      var td1 = document.createElement("td"); td1.className = "date"; td1.textContent = prettyDate(e.date);
+      var td2 = document.createElement("td"); td2.innerHTML = '<span class="pill" style="--c:' + s.color + '"><i></i>' + s.name + '</span>';
+      var td3 = document.createElement("td"); td3.className = "dur num"; td3.textContent = fmt(e.minutes);
+      var td4 = document.createElement("td"); td4.className = "note"; td4.textContent = e.note || "—";
+      var td5 = document.createElement("td"); td5.style.textAlign = "right";
+      if (!readOnly) {
+        var b = document.createElement("button");
+        b.type = "button"; b.className = "del"; b.textContent = "Delete"; b.setAttribute("data-id", e.id);
+        b.setAttribute("aria-label", "Delete " + s.name + " entry from " + prettyDate(e.date));
+        td5.appendChild(b);
+      }
+      [td1, td2, td3, td4, td5].forEach(function (td) { tr.appendChild(td); });
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb);
+    box.innerHTML = "";
+    box.appendChild(table);
+    var more = $("show-more");
+    more.hidden = list.length <= LIMIT;
+    more.textContent = showAll ? "Show fewer" : "Show all " + list.length + " entries";
+  }
+
+  function renderAll() { renderSummary(); renderChart(); renderTable(); }
+
+  /* ---------- static UI ---------- */
+  function buildPicker() {
+    var html = "";
+    SUBJECTS.forEach(function (s, i) {
+      html += '<input type="radio" name="subject" id="subj-' + s.id + '" value="' + s.id + '"' + (i === 0 ? " checked" : "") + '>' +
+        '<label for="subj-' + s.id + '" style="--c:' + s.color + '"><span class="sw"></span>' + s.name + '</label>';
+    });
+    $("subj-pick").innerHTML = html;
+    $("legend").innerHTML = SUBJECTS.map(function (s) {
+      return '<span style="--c:' + s.color + '"><i></i>' + s.name + '</span>';
+    }).join("");
+  }
+  function selectedSubject() {
+    var r = document.querySelector('input[name="subject"]:checked');
+    return r ? r.value : SUBJECTS[0].id;
+  }
+
+  function setPeriod(p) {
+    period = p; showAll = false;
+    lsSet(LS_PERIOD, p);
+    document.querySelectorAll(".seg button").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(b.getAttribute("data-period") === p));
+    });
+    renderAll();
+  }
+
+  /* ---------- saving ---------- */
+  function save(entry) {
+    if (!store) { toast("Still connecting. Try again in a moment."); return Promise.reject(); }
+    if (readOnly) return Promise.reject();
+    return store.add(entry).then(function () {
+      toast("Logged " + fmt(entry.minutes) + " of " + BY_ID[entry.subject].name);
+    }, function (err) {
+      var code = err && err.code;
+      if (code === "invalid_argument" && store.mode === "db") { readOnly = true; applyReadOnly(); }
+      toast(code === "quota_exceeded" ? "Your log is full. Delete some old entries first." : "Couldn't save that entry. Check your connection and try again.");
+      throw err;
+    });
+  }
+
+  function onSubmit(ev) {
+    ev.preventDefault();
+    if (busy) return;
+    var msg = $("form-msg");
+    var date = $("f-date").value;
+    var h = parseInt($("f-hours").value || "0", 10), m = parseInt($("f-mins").value || "0", 10);
+    if (isNaN(h) || h < 0) h = 0;
+    if (isNaN(m) || m < 0) m = 0;
+    var mins = h * 60 + m;
+    if (!date) { msg.textContent = "Choose the date of the class."; return; }
+    if (mins <= 0) { msg.textContent = "Enter how long the class ran, in hours and minutes."; return; }
+    if (mins > 24 * 60) { msg.textContent = "A single entry can't be longer than 24 hours."; return; }
+    msg.textContent = "";
+    busy = true; $("f-submit").disabled = true;
+    save({ subject: selectedSubject(), date: date, minutes: mins, note: $("f-note").value.trim().slice(0, 140), createdAt: new Date().toISOString() })
+      .then(function () { $("f-hours").value = ""; $("f-mins").value = ""; $("f-note").value = ""; }, function () {})
+      .then(function () { busy = false; $("f-submit").disabled = readOnly; });
+  }
+
+  /* ---------- delete with inline confirm ---------- */
+  function onTableClick(ev) {
+    var b = ev.target.closest(".del");
+    if (!b) return;
+    var id = b.getAttribute("data-id");
+    if (b.getAttribute("data-armed") !== "true") {
+      b.setAttribute("data-armed", "true");
+      b.textContent = "Confirm delete";
+      setTimeout(function () { if (b.isConnected) { b.removeAttribute("data-armed"); b.textContent = "Delete"; } }, 3000);
+      return;
+    }
+    b.disabled = true;
+    store.remove(id).then(function () { toast("Entry deleted"); }, function () { b.disabled = false; toast("Couldn't delete that entry. Try again."); });
+  }
+
+  /* ---------- timer ---------- */
+  var timerTick = null;
+  function getTimer() { try { var t = JSON.parse(lsGet(LS_TIMER) || "null"); return t && BY_ID[t.subject] && t.start ? t : null; } catch (e) { return null; } }
+  function clock(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000));
+    return Math.floor(s / 3600) + ":" + pad(Math.floor(s / 60) % 60) + ":" + pad(s % 60);
+  }
+  function renderTimer() {
+    var t = getTimer(), box = $("timer"), actions = $("t-actions");
+    clearInterval(timerTick);
+    if (!t) {
+      box.setAttribute("data-running", "false");
+      box.style.removeProperty("--c");
+      $("t-label").textContent = "Class timer";
+      $("t-clock").textContent = "0:00:00";
+      actions.innerHTML = '<button type="button" class="btn ghost" id="t-start">Start timer</button>';
+      $("t-start").disabled = readOnly;
+      return;
+    }
+    var s = BY_ID[t.subject];
+    box.setAttribute("data-running", "true");
+    box.style.setProperty("--c", s.color);
+    $("t-label").textContent = s.name + " class running";
+    var upd = function () { $("t-clock").textContent = clock(Date.now() - t.start); };
+    upd(); timerTick = setInterval(upd, 1000);
+    actions.innerHTML = '<button type="button" class="btn" id="t-stop">Stop and log</button><button type="button" class="btn ghost" id="t-discard">Discard</button>';
+    $("t-stop").disabled = readOnly;
+  }
+  function onTimerClick(ev) {
+    var id = ev.target.id;
+    if (id === "t-start") {
+      lsSet(LS_TIMER, JSON.stringify({ subject: selectedSubject(), start: Date.now() }));
+      renderTimer();
+    } else if (id === "t-discard") {
+      lsSet(LS_TIMER, null); renderTimer(); toast("Timer discarded");
+    } else if (id === "t-stop") {
+      var t = getTimer(); if (!t) return;
+      var mins = Math.round((Date.now() - t.start) / 60000);
+      if (mins < 1) { toast("Less than a minute. Nothing logged."); lsSet(LS_TIMER, null); renderTimer(); return; }
+      mins = Math.min(mins, 24 * 60);
+      ev.target.disabled = true;
+      save({ subject: t.subject, date: iso(new Date(t.start)), minutes: mins, note: $("f-note").value.trim().slice(0, 140), createdAt: new Date().toISOString() })
+        .then(function () { lsSet(LS_TIMER, null); $("f-note").value = ""; renderTimer(); }, function () { ev.target.disabled = false; });
+    }
+  }
+
+  function applyReadOnly() {
+    document.querySelectorAll("#entry-form input, #entry-form button, #timer button").forEach(function (el) { el.disabled = true; });
+    $("log-h").textContent = "Log a class (view only)";
+    renderTable();
+  }
+
+  /* ---------- init ---------- */
+  function init() {
+    buildPicker();
+    $("f-date").value = iso(today());
+    $("f-date").max = iso(addDays(today(), 1));
+    var saved = lsGet(LS_PERIOD);
+    if (saved === "week" || saved === "month" || saved === "all") period = saved;
+    document.querySelectorAll(".seg button").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(b.getAttribute("data-period") === period));
+      b.addEventListener("click", function () { setPeriod(b.getAttribute("data-period")); });
+    });
+    document.querySelectorAll(".chip").forEach(function (c) {
+      c.addEventListener("click", function () {
+        var m = +c.getAttribute("data-min");
+        $("f-hours").value = Math.floor(m / 60);
+        $("f-mins").value = m % 60;
+        $("form-msg").textContent = "";
+      });
+    });
+    $("entry-form").addEventListener("submit", onSubmit);
+    $("table-box").addEventListener("click", onTableClick);
+    $("timer").addEventListener("click", onTimerClick);
+    $("show-more").addEventListener("click", function () { showAll = !showAll; renderTable(); });
+    renderAll();
+    renderTimer();
+    connect();
+  }
+
+  function connect() {
+    var c = window.claude;
+    if (!c || typeof c.use !== "function") { useLocal(); return; }
+    c.use("db").then(function (db) {
+      if (!db) { useLocal(); return; }
+      store = makeDbStore(db);
+      setStatus("loading");
+      var slow = setTimeout(function () { setStatus("slow"); }, 10000);
+      store.subscribe(function (list) {
+        entries = clean(list); renderAll();
+      }, function () {
+        clearTimeout(slow); setStatus("error");
+      }, function () {
+        clearTimeout(slow); setStatus("synced");
+      });
+      c.use("user").then(function (u) {
+        if (!u || typeof u.can !== "function") return;
+        return Promise.resolve(u.can("data.write")).then(function (ok) {
+          if (ok === false) { readOnly = true; applyReadOnly(); }
+        });
+      }).catch(function () {});
+    }, useLocal);
+  }
+  function useLocal() {
+    store = localStore;
+    setStatus("local");
+    store.subscribe(function (list) { entries = clean(list); renderAll(); });
+  }
+
+  init();
+})();
+</script>
+
+</body>
+</html>
