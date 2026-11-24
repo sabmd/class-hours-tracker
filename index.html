@@ -176,6 +176,10 @@ tr:last-child td { border-bottom: 0; }
 .del { border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; white-space: nowrap; }
 .del:hover { color: var(--danger); border-color: var(--line); }
 .del[data-armed="true"] { color: var(--accent-fg); background: var(--danger); border-color: var(--danger); }
+tr.day-row td { background: var(--surface-2); padding: 7px 10px; border-bottom: 0; }
+tr.day-row .day-name { font-weight: 600; font-size: 0.88rem; }
+tr.day-row .day-meta { color: var(--muted); font-size: 0.82rem; margin-left: 10px; }
+tbody + tbody tr.day-row td, tr.day-row:not(:first-child) td { border-top: 10px solid var(--surface); }
 .empty { text-align: center; color: var(--muted); padding: 28px 12px; font-size: 0.9rem; }
 .empty strong { color: var(--fg); display: block; font-family: var(--font-display); font-size: 1rem; margin-bottom: 4px; }
 .more { align-self: center; }
@@ -573,12 +577,31 @@ td.r, th.r { text-align: right; }
     }
     var LIMIT = 25, shown = showAll ? list : list.slice(0, LIMIT);
     var table = document.createElement("table");
-    table.innerHTML = '<thead><tr><th scope="col">Date</th><th scope="col">Subject</th><th scope="col">Time</th><th scope="col">Topic</th><th scope="col"><span class="eyebrow" style="position:absolute;left:-9999px">Actions</span></th></tr></thead>';
+    table.innerHTML = '<thead><tr><th scope="col">Subject</th><th scope="col">Time</th><th scope="col">Topic</th><th scope="col"><span class="eyebrow" style="position:absolute;left:-9999px">Actions</span></th></tr></thead>';
     var tb = document.createElement("tbody");
+    var lastDate = null;
     shown.forEach(function (e) {
       var s = BY_ID[e.subject];
+      if (e.date !== lastDate) {
+        lastDate = e.date;
+        var dayList = entries.filter(function (x) { return x.date === e.date; });
+        var dayMins = dayList.reduce(function (a, x) { return a + x.minutes; }, 0);
+        var hr = document.createElement("tr"); hr.className = "day-row";
+        var hd = document.createElement("td"); hd.colSpan = 3;
+        hd.innerHTML = '<span class="day-name">' + prettyDate(e.date) + '</span><span class="day-meta num">' +
+          dayList.length + (dayList.length === 1 ? ' class' : ' classes') + ' · ' + fmt(dayMins) + '</span>';
+        var ha = document.createElement("td"); ha.style.textAlign = "right";
+        if (!readOnly) {
+          var cb = document.createElement("button");
+          cb.type = "button"; cb.className = "del clear-day"; cb.textContent = "Clear day";
+          cb.setAttribute("data-date", e.date);
+          cb.setAttribute("data-confirm", dayList.length === 1 ? "Delete 1 entry?" : "Delete all " + dayList.length + " entries?");
+          cb.setAttribute("aria-label", "Delete every entry from " + prettyDate(e.date));
+          ha.appendChild(cb);
+        }
+        hr.appendChild(hd); hr.appendChild(ha); tb.appendChild(hr);
+      }
       var tr = document.createElement("tr");
-      var td1 = document.createElement("td"); td1.className = "date"; td1.textContent = prettyDate(e.date);
       var td2 = document.createElement("td"); td2.innerHTML = '<span class="pill" style="--c:' + s.color + '"><i></i>' + s.name + '</span>';
       var td3 = document.createElement("td"); td3.className = "dur num"; td3.textContent = fmt(e.minutes);
       var td4 = document.createElement("td"); td4.className = "note"; td4.textContent = e.note || "—";
@@ -586,10 +609,11 @@ td.r, th.r { text-align: right; }
       if (!readOnly) {
         var b = document.createElement("button");
         b.type = "button"; b.className = "del"; b.textContent = "Delete"; b.setAttribute("data-id", e.id);
+        b.setAttribute("data-confirm", "Confirm delete");
         b.setAttribute("aria-label", "Delete " + s.name + " entry from " + prettyDate(e.date));
         td5.appendChild(b);
       }
-      [td1, td2, td3, td4, td5].forEach(function (td) { tr.appendChild(td); });
+      [td2, td3, td4, td5].forEach(function (td) { tr.appendChild(td); });
       tb.appendChild(tr);
     });
     table.appendChild(tb);
@@ -886,15 +910,34 @@ td.r, th.r { text-align: right; }
   /* ---------- delete with inline confirm ---------- */
   function onTableClick(ev) {
     var b = ev.target.closest(".del");
-    if (!b) return;
-    var id = b.getAttribute("data-id");
+    if (!b || !store) return;
+    var isDay = b.classList.contains("clear-day");
     if (b.getAttribute("data-armed") !== "true") {
+      var idle = b.textContent;
       b.setAttribute("data-armed", "true");
-      b.textContent = "Confirm delete";
-      setTimeout(function () { if (b.isConnected) { b.removeAttribute("data-armed"); b.textContent = "Delete"; } }, 3000);
+      b.textContent = b.getAttribute("data-confirm");
+      setTimeout(function () { if (b.isConnected && !b.disabled) { b.removeAttribute("data-armed"); b.textContent = idle; } }, 4000);
       return;
     }
     b.disabled = true;
+    if (isDay) {
+      var date = b.getAttribute("data-date");
+      var ids = entries.filter(function (x) { return x.date === date; }).map(function (x) { return x.id; });
+      var done = 0;
+      var chain = ids.reduce(function (p, id) {
+        return p.then(function () { return store.remove(id).then(function () { done++; }); });
+      }, Promise.resolve());
+      chain.then(function () {
+        var when = prettyDate(date);
+        when = when === "Today" || when === "Yesterday" ? when.toLowerCase() : when;
+        toast("Deleted " + done + (done === 1 ? " entry" : " entries") + " from " + when);
+      }, function () {
+        b.disabled = false;
+        toast(done ? "Deleted " + done + " of " + ids.length + " entries. Press Clear day again to finish." : "Couldn't clear that day. Try again.");
+      });
+      return;
+    }
+    var id = b.getAttribute("data-id");
     store.remove(id).then(function () { toast("Entry deleted"); }, function () { b.disabled = false; toast("Couldn't delete that entry. Try again."); });
   }
 
